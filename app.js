@@ -42,11 +42,11 @@ const PREFIX = "smartpersonal:";
 const API = "https://api.smartpersonal.smartlinkdigital.com.br";
 const CHAVE_TOKEN = PREFIX + "_token";
 const CHAVE_FILA = PREFIX + "_fila";
-const CHAVE_CLIENTE = PREFIX + "_cliente";
+const CHAVE_TEMPOS = PREFIX + "_tempos";
 
 /* chaves internas do sincronismo não são dados do usuário e não devem ser
    sincronizadas — senão um aparelho mandaria o próprio token pro outro. */
-const CHAVES_INTERNAS = ["_token", "_fila", "_cliente"];
+const CHAVES_INTERNAS = ["_token", "_fila", "_cliente", "_tempos"];
 const nuvem = {
   token: null,
   clienteId: null,
@@ -59,16 +59,38 @@ const nuvem = {
   iniciar() {
     try {
       this.token = window.localStorage.getItem(CHAVE_TOKEN);
-      this.clienteId = window.localStorage.getItem(CHAVE_CLIENTE);
-      if (!this.clienteId) {
-        // identifica ESTE aparelho, pra ele não receber de volta o eco do que
-        // ele mesmo acabou de escrever
-        this.clienteId = Math.random().toString(36).slice(2) + Date.now().toString(36);
-        window.localStorage.setItem(CHAVE_CLIENTE, this.clienteId);
-      }
+    } catch (e) {}
+    /* Identifica esta ABA, não o aparelho, e some quando ela fecha.
+       Antes ficava salvo no localStorage: duas abas do mesmo navegador
+       compartilhavam o mesmo id, o servidor tratava as duas como "quem
+       escreveu" e nenhuma recebia as mudanças da outra — elas iam divergindo
+       em silêncio até uma sobrescrever a outra. */
+    this.clienteId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try {
+      window.localStorage.removeItem(PREFIX + "_cliente");
     } catch (e) {}
     window.addEventListener("online", () => this.descarregarFila());
     setInterval(() => this.descarregarFila(), 20000);
+  },
+  /* Hora da última alteração de cada chave FEITA NESTE APARELHO. É o que
+     permite ao servidor recusar uma gravação atrasada. */
+  lerTempos() {
+    try {
+      return JSON.parse(window.localStorage.getItem(CHAVE_TEMPOS) || "{}");
+    } catch (e) {
+      return {};
+    }
+  },
+  marcarTempo(chave, quando) {
+    const t = this.lerTempos();
+    t[chave] = quando || Date.now();
+    try {
+      window.localStorage.setItem(CHAVE_TEMPOS, JSON.stringify(t));
+    } catch (e) {}
+    return t[chave];
+  },
+  tempoDe(chave) {
+    return this.lerTempos()[chave] || 0;
   },
   logado() {
     return !!this.token;
@@ -146,61 +168,106 @@ const nuvem = {
     }
     window.location.reload();
   },
-  /* Primeiro login neste aparelho: junta o que existe dos dois lados.
-     A nuvem manda no empate — é ela que tem o histórico de todos os aparelhos.
-     O que só existe aqui (dados criados antes de ter conta) sobe. */
+  /* Login neste aparelho: junta o que existe dos dois lados, chave a chave,
+     ficando sempre com a versão MAIS NOVA.
+      Antes a nuvem simplesmente ganhava. Isso apagava trabalho recente feito
+     aqui que ainda não tinha subido — bastava um outro aparelho ter mandado
+     qualquer coisa depois. Agora quem decide é a hora de cada chave. */
   async primeiraSincronizacao() {
     let daNuvem = {};
+    let horasDaNuvem = {};
     try {
       const r = await this.pedir("/storage", {
         method: "GET"
       });
       daNuvem = r && r.dados || {};
+      horasDaNuvem = r && r.atualizados || {};
     } catch (e) {
       if (e.status === 401) throw e;
       return; // sem internet: segue com o que tem local, a fila resolve depois
     }
-    const daquiSoLocal = {};
+    const paraSubir = {};
+    const temposParaSubir = {};
     listarChavesApp().forEach(k => {
       const chave = k.slice(PREFIX.length);
       if (CHAVES_INTERNAS.indexOf(chave) >= 0) return;
-      if (Object.prototype.hasOwnProperty.call(daNuvem, chave)) return;
+      let local;
       try {
-        daquiSoLocal[chave] = window.localStorage.getItem(k);
-      } catch (e) {}
+        local = window.localStorage.getItem(k);
+      } catch (e) {
+        return;
+      }
+      if (local == null) return;
+      const temNaNuvem = Object.prototype.hasOwnProperty.call(daNuvem, chave);
+      const horaLocal = this.tempoDe(chave);
+      const horaNuvem = horasDaNuvem[chave] || 0;
+
+      /* Dado local sem hora registrada é de antes deste sistema existir.
+         Nesse caso a nuvem ganha (se tiver a chave), porque não dá pra
+         afirmar que o local é mais novo — e chutar errado apaga dado. */
+      if (temNaNuvem && !(horaLocal > horaNuvem)) return;
+      paraSubir[chave] = local;
+      temposParaSubir[chave] = horaLocal || Date.now();
     });
+
+    // aplica o que a nuvem tem de mais novo
     Object.keys(daNuvem).forEach(chave => {
+      if (Object.prototype.hasOwnProperty.call(paraSubir, chave)) return;
       try {
         window.localStorage.setItem(PREFIX + chave, textoDoValor(daNuvem[chave]));
       } catch (e) {}
+      this.marcarTempo(chave, horasDaNuvem[chave]);
     });
-    if (Object.keys(daquiSoLocal).length > 0) {
+    if (Object.keys(paraSubir).length > 0) {
       try {
         await this.pedir("/storage/lote", {
           method: "POST",
           body: JSON.stringify({
-            dados: daquiSoLocal
+            dados: paraSubir,
+            tempos: temposParaSubir
           })
         });
       } catch (e) {
-        Object.keys(daquiSoLocal).forEach(c => this.enfileirar(c, daquiSoLocal[c]));
+        Object.keys(paraSubir).forEach(c => this.enfileirar(c, paraSubir[c], temposParaSubir[c]));
       }
     }
   },
   /* debounce por chave: digitar o peso de uma série dispara muitos setState
-     seguidos, e não faz sentido mandar uma requisição por tecla. */
+     seguidos, e não faz sentido mandar uma requisição por tecla.
+     A hora é marcada AGORA, na alteração — não na hora do envio. Se o envio
+     ficar preso numa fila offline por horas, ele ainda representa uma edição
+     daquele momento, e não pode passar por cima de algo escrito depois. */
   salvar(chave, valorTexto) {
     if (!this.token || CHAVES_INTERNAS.indexOf(chave) >= 0) return;
+    const quando = this.marcarTempo(chave);
     clearTimeout(this.timers[chave]);
     this.timers[chave] = setTimeout(() => {
       this.pedir("/storage", {
         method: "POST",
         body: JSON.stringify({
           chave,
-          valor: valorTexto
+          valor: valorTexto,
+          ts: quando
         })
-      }).catch(() => this.enfileirar(chave, valorTexto));
+      }).catch(e => {
+        if (e.status === 409) return this.adotarVersaoDoServidor(chave, e.corpo);
+        this.enfileirar(chave, valorTexto, quando);
+      });
     }, 600);
+  },
+  /* O servidor recusou porque já tem coisa mais nova. Em vez de insistir (e
+     acabar apagando o trabalho de outro aparelho), este aqui se corrige. */
+  adotarVersaoDoServidor(chave, corpo) {
+    if (!corpo || corpo.valor == null) return;
+    const texto = textoDoValor(corpo.valor);
+    try {
+      window.localStorage.setItem(PREFIX + chave, texto);
+    } catch (e) {}
+    this.marcarTempo(chave, corpo.atualizadoEm);
+    const fila = this.lerFila();
+    delete fila[chave];
+    this.gravarFila(fila);
+    this.avisarTelas(chave, texto);
   },
   lerFila() {
     try {
@@ -214,9 +281,12 @@ const nuvem = {
       window.localStorage.setItem(CHAVE_FILA, JSON.stringify(fila));
     } catch (e) {}
   },
-  enfileirar(chave, valorTexto) {
+  enfileirar(chave, valorTexto, quando) {
     const fila = this.lerFila();
-    fila[chave] = valorTexto; // só o valor mais recente importa
+    fila[chave] = {
+      valor: valorTexto,
+      quando: quando || Date.now()
+    };
     this.gravarFila(fila);
   },
   async descarregarFila() {
@@ -224,20 +294,33 @@ const nuvem = {
     const fila = this.lerFila();
     const chaves = Object.keys(fila);
     if (chaves.length === 0) return;
+    const dados = {};
+    const tempos = {};
+    chaves.forEach(c => {
+      dados[c] = fila[c].valor;
+      tempos[c] = fila[c].quando;
+    });
     try {
-      await this.pedir("/storage/lote", {
+      const r = await this.pedir("/storage/lote", {
         method: "POST",
         body: JSON.stringify({
-          dados: fila
+          dados,
+          tempos
         })
       });
       // só apaga o que foi enviado: pode ter entrado coisa nova na fila
       // enquanto a requisição estava no ar.
       const agora = this.lerFila();
       chaves.forEach(c => {
-        if (agora[c] === fila[c]) delete agora[c];
+        if (agora[c] && agora[c].quando === fila[c].quando) delete agora[c];
       });
       this.gravarFila(agora);
+
+      // o que o servidor recusou por ser velho volta corrigido
+      const recusadas = r && r.recusadas || {};
+      Object.keys(recusadas).forEach(c => this.adotarVersaoDoServidor(c, {
+        valor: recusadas[c]
+      }));
     } catch (e) {}
   },
   conectar() {
@@ -257,10 +340,17 @@ const nuvem = {
         return;
       }
       if (msg.tipo !== "mudou") return;
+
+      /* Só aceita se for mais novo do que o que existe aqui. Sem essa conferência
+         um aviso atrasado (aparelho que reconectou e reenviou coisa antiga)
+         apagaria a edição que a pessoa acabou de fazer nesta tela. */
+      const quando = msg.quando || 0;
+      if (quando && quando < this.tempoDe(msg.chave)) return;
       const texto = msg.valor === null ? null : textoDoValor(msg.valor);
       try {
         if (texto === null) window.localStorage.removeItem(PREFIX + msg.chave);else window.localStorage.setItem(PREFIX + msg.chave, texto);
       } catch (e) {}
+      this.marcarTempo(msg.chave, quando || Date.now());
       this.avisarTelas(msg.chave, texto);
     };
     this.ws.onclose = () => {
@@ -285,10 +375,13 @@ const nuvem = {
       if (s.size === 0) this.assinantes.delete(chave);
     };
   },
-  avisarTelas(chave, texto) {
+  /* `exceto` é a própria tela que originou a mudança — ela já tem o valor,
+     avisá-la de volta só causaria re-render à toa. */
+  avisarTelas(chave, texto, exceto) {
     const s = this.assinantes.get(chave);
     if (!s) return;
     s.forEach(cb => {
+      if (cb === exceto) return;
       try {
         cb(texto);
       } catch (e) {}
@@ -335,21 +428,41 @@ function useLocalStorage(key, initialValue) {
      sem isso, receber uma mudança dispararia um novo envio, e os dois
      aparelhos ficariam ecoando um pro outro. */
   const veioDeFora = useRef(false);
+  const meuAviso = useRef(null);
   useEffect(() => {
-    return nuvem.inscrever(key, texto => {
+    meuAviso.current = texto => {
       veioDeFora.current = true;
       setValue(interpretar(texto));
-    });
+    };
+    return nuvem.inscrever(key, meuAviso.current);
   }, [key]);
+
+  /* A montagem NÃO envia nada pra nuvem.
+      Era daí que vinha a perda de dados: várias telas usam a mesma chave, e
+     cada uma que montava reenviava o valor que tinha em memória. Uma tela
+     aberta antes de uma edição carregava a versão velha e a devolvia pro
+     servidor, que espalhava o retrocesso pros outros aparelhos. Só sobe o que
+     a pessoa realmente mudou. */
+  const jaMontou = useRef(false);
   useEffect(() => {
     const texto = JSON.stringify(value);
     try {
       window.localStorage.setItem(fullKey, texto);
     } catch (e) {}
+    if (!jaMontou.current) {
+      jaMontou.current = true;
+      return;
+    }
     if (veioDeFora.current) {
       veioDeFora.current = false;
       return;
     }
+
+    /* Avisa as OUTRAS telas que usam esta mesma chave. Cada uma guarda a
+       própria cópia em memória; sem isso, uma tela que estava aberta desde
+       antes continuaria com o valor velho — e era justamente esse valor velho
+       que voltava pro servidor. */
+    nuvem.avisarTelas(key, texto, meuAviso.current);
     nuvem.salvar(key, texto);
   }, [fullKey, value]);
   return [value, setValue];
