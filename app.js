@@ -5242,16 +5242,176 @@ function CampoAcesso({
     className: "rounded-lg border border-border bg-surface2 px-3 py-2.5 text-sm text-text outline-none transition-colors placeholder:text-textFaint focus:border-red"
   })));
 }
+
+/* Pedir link de recuperação. A mensagem de sucesso é sempre a mesma, exista a
+   conta ou não — igual à resposta do servidor, que de propósito não revela
+   quem tem cadastro. */
+function TelaEsqueciSenha({
+  aoVoltar
+}) {
+  const [email, setEmail] = useState("");
+  const [enviado, setEnviado] = useState(false);
+  const [erro, setErro] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  async function enviar(e) {
+    e.preventDefault();
+    setErro("");
+    setEnviando(true);
+    try {
+      await nuvem.pedir("/auth/recuperar", {
+        method: "POST",
+        body: JSON.stringify({
+          email: email.trim()
+        })
+      });
+      setEnviado(true);
+    } catch (err) {
+      setErro(err.message || "Não consegui enviar agora. Tente de novo.");
+    }
+    setEnviando(false);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "flex min-h-screen items-center justify-center bg-bg p-5 text-text"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-full max-w-sm"
+  }, /*#__PURE__*/React.createElement("h1", {
+    className: "mb-7 text-center font-display text-2xl font-bold tracking-tight"
+  }, "Smart ", /*#__PURE__*/React.createElement("span", {
+    className: "text-red"
+  }, "Coliseu")), enviado ? /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl border border-border bg-surface p-5 text-center"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-3xl"
+  }, "\uD83D\uDCE7"), /*#__PURE__*/React.createElement("p", {
+    className: "mt-3 text-sm text-text"
+  }, "Se existir uma conta com esse e-mail, o link para criar uma senha nova j\xE1 est\xE1 a caminho."), /*#__PURE__*/React.createElement("p", {
+    className: "mt-2 text-xs text-textMuted"
+  }, "O link vale por 1 hora. N\xE3o esque\xE7a de olhar a caixa de spam."), /*#__PURE__*/React.createElement("button", {
+    onClick: aoVoltar,
+    className: "mt-5 w-full rounded-lg bg-red px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+  }, "Voltar para o login")) : /*#__PURE__*/React.createElement("form", {
+    onSubmit: enviar,
+    className: "flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-5"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "text-sm text-textMuted"
+  }, "Digite seu e-mail e enviaremos um link para voc\xEA criar uma senha nova."), /*#__PURE__*/React.createElement(CampoAcesso, {
+    rotulo: "E-mail",
+    type: "email",
+    value: email,
+    required: true,
+    autoComplete: "email",
+    placeholder: "voce@email.com",
+    onChange: e => setEmail(e.target.value)
+  }), erro && /*#__PURE__*/React.createElement("p", {
+    className: "rounded-lg border border-red/40 bg-red/10 px-3 py-2 text-xs text-red"
+  }, erro), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: enviando,
+    className: "mt-1 rounded-lg bg-red px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+  }, enviando ? "Enviando..." : "Enviar link"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: aoVoltar,
+    className: "text-xs text-textMuted underline-offset-2 transition-colors hover:text-text hover:underline"
+  }, "Voltar para o login"))));
+}
+
+/* Tela aberta pelo link do e-mail (…/?recuperar=TOKEN). */
+function TelaNovaSenha({
+  token,
+  aoConcluir
+}) {
+  const [senha, setSenha] = useState("");
+  const [repetir, setRepetir] = useState("");
+  const [erro, setErro] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [pronto, setPronto] = useState(false);
+  async function enviar(e) {
+    e.preventDefault();
+    if (senha !== repetir) {
+      setErro("As duas senhas não são iguais.");
+      return;
+    }
+    setErro("");
+    setEnviando(true);
+    try {
+      await nuvem.pedir("/auth/redefinir", {
+        method: "POST",
+        body: JSON.stringify({
+          token,
+          senha
+        })
+      });
+      setPronto(true);
+    } catch (err) {
+      setErro(err.message || "Não consegui redefinir a senha.");
+    }
+    setEnviando(false);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "flex min-h-screen items-center justify-center bg-bg p-5 text-text"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-full max-w-sm"
+  }, /*#__PURE__*/React.createElement("h1", {
+    className: "mb-7 text-center font-display text-2xl font-bold tracking-tight"
+  }, "Smart ", /*#__PURE__*/React.createElement("span", {
+    className: "text-red"
+  }, "Coliseu")), pronto ? /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl border border-border bg-surface p-5 text-center"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-3xl"
+  }, "\u2705"), /*#__PURE__*/React.createElement("p", {
+    className: "mt-3 text-sm text-text"
+  }, "Senha alterada! J\xE1 pode entrar com ela."), /*#__PURE__*/React.createElement("button", {
+    onClick: aoConcluir,
+    className: "mt-5 w-full rounded-lg bg-red px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+  }, "Ir para o login")) : /*#__PURE__*/React.createElement("form", {
+    onSubmit: enviar,
+    className: "flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-5"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "text-sm text-textMuted"
+  }, "Escolha sua nova senha."), /*#__PURE__*/React.createElement(CampoAcesso, {
+    rotulo: "Nova senha",
+    type: "password",
+    value: senha,
+    required: true,
+    minLength: 6,
+    autoComplete: "new-password",
+    placeholder: "M\xEDnimo 6 caracteres",
+    onChange: e => setSenha(e.target.value)
+  }), /*#__PURE__*/React.createElement(CampoAcesso, {
+    rotulo: "Repita a senha",
+    type: "password",
+    value: repetir,
+    required: true,
+    minLength: 6,
+    autoComplete: "new-password",
+    placeholder: "Digite de novo",
+    onChange: e => setRepetir(e.target.value)
+  }), erro && /*#__PURE__*/React.createElement("p", {
+    className: "rounded-lg border border-red/40 bg-red/10 px-3 py-2 text-xs text-red"
+  }, erro), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: enviando,
+    className: "mt-1 rounded-lg bg-red px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+  }, enviando ? "Salvando..." : "Salvar nova senha"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: aoConcluir,
+    className: "text-xs text-textMuted underline-offset-2 transition-colors hover:text-text hover:underline"
+  }, "Cancelar"))));
+}
 function TelaAcesso({
   aoEntrar
 }) {
-  const [modo, setModo] = useState("entrar"); // "entrar" | "criar"
+  const [modo, setModo] = useState("entrar"); // "entrar" | "criar" | "esqueci"
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [enviando, setEnviando] = useState(false);
   const criando = modo === "criar";
+  if (modo === "esqueci") return /*#__PURE__*/React.createElement(TelaEsqueciSenha, {
+    aoVoltar: () => setModo("entrar")
+  });
   async function enviar(e) {
     e.preventDefault();
     setErro("");
@@ -5317,7 +5477,14 @@ function TelaAcesso({
       setErro("");
     },
     className: "text-xs text-textMuted underline-offset-2 transition-colors hover:text-text hover:underline"
-  }, criando ? "Já tenho conta — entrar" : "Não tenho conta — criar agora")), /*#__PURE__*/React.createElement("p", {
+  }, criando ? "Já tenho conta — entrar" : "Não tenho conta — criar agora"), !criando && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: () => {
+      setModo("esqueci");
+      setErro("");
+    },
+    className: "text-xs text-textFaint underline-offset-2 transition-colors hover:text-textMuted hover:underline"
+  }, "Esqueci minha senha")), /*#__PURE__*/React.createElement("p", {
     className: "mt-4 text-center text-xs text-textFaint"
   }, "Seus treinos ficam salvos na sua conta e aparecem em todos os seus aparelhos.")));
 }
@@ -5379,6 +5546,18 @@ function TelaAssinatura({
 function PortaoDeAcesso({
   children
 }) {
+  /* O link do e-mail chega como …/?recuperar=TOKEN. Lê uma vez só, na
+     montagem, e já limpa a URL: o token é de uso único e não deve ficar
+     pendurado na barra de endereço nem no histórico do navegador. */
+  const [tokenRecuperacao, setTokenRecuperacao] = useState(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get("recuperar");
+      if (t) window.history.replaceState({}, "", window.location.pathname);
+      return t;
+    } catch (e) {
+      return null;
+    }
+  });
   const [estado, setEstado] = useState(nuvem.logado() ? "checando" : "deslogado");
   const [situacao, setSituacao] = useState(null);
   async function conferir() {
@@ -5413,6 +5592,19 @@ function PortaoDeAcesso({
   useEffect(() => {
     conferir();
   }, []);
+
+  /* Vem antes de tudo: quem clicou no link de recuperação não lembra a senha,
+     então não adianta cair no login — nem numa sessão antiga ainda aberta
+     neste aparelho. */
+  if (tokenRecuperacao) {
+    return /*#__PURE__*/React.createElement(TelaNovaSenha, {
+      token: tokenRecuperacao,
+      aoConcluir: () => {
+        setTokenRecuperacao(null);
+        conferir();
+      }
+    });
+  }
   if (estado === "checando") {
     return /*#__PURE__*/React.createElement("div", {
       className: "flex min-h-screen items-center justify-center bg-bg"
