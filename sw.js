@@ -1,5 +1,5 @@
 /* Service worker do Smart Coliseu — gerado por build.js */
-const CACHE = 'smart-coliseu-v1786087037176';
+const CACHE = 'smart-coliseu-v1786478544695';
 
 /* casca do app: o que precisa estar em cache pra abrir sem internet */
 const CASCA = [
@@ -10,6 +10,7 @@ const CASCA = [
   './vendor/react.js',
   './vendor/react-dom.js',
   './vendor/tailwind.js',
+  './fontes/fontes.css',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];
