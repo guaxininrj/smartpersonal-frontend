@@ -1297,7 +1297,16 @@ function Configuracoes() {
   const alternarLembrete = async () => {
     if (typeof Notification === "undefined") return;
     if (!lembrete.ativo) {
-      const permissao = await Notification.requestPermission();
+      /* requestPermission pode lançar em alguns navegadores (origem não
+         segura, por exemplo). Mesmo motivo do avisar(): não deixar um
+         detalhe de notificação derrubar a tela de Configurações. */
+      let permissao;
+      try {
+        permissao = await Notification.requestPermission();
+      } catch (e) {
+        console.error("[lembrete] não consegui pedir permissão:", e);
+        return;
+      }
       setPermissaoNotif(permissao);
       if (permissao !== "granted") return;
     }
@@ -5251,6 +5260,31 @@ function diaLabelDeHoje() {
   const diaJs = new Date().getDay();
   return diaJs === 0 ? "Domingo" : DIAS_SEMANA[diaJs - 1];
 }
+
+/* Mostra a notificação do jeito que cada aparelho aceita.
+   O Chrome do Android PROÍBE `new Notification(...)` -- ele lança
+   "Illegal constructor. Use ServiceWorkerRegistration.showNotification()".
+   Como isso acontecia dentro de um efeito do React, o erro subia até o
+   limite de erro e derrubava a tela inteira: o app abria no celular
+   direto no "Algo deu errado".
+   No computador os dois caminhos funcionam, então tenta primeiro o
+   service worker (que é o único que o celular aceita) e só cai no
+   construtor quando não há worker registrado. */
+async function avisar(titulo, opcoes) {
+  try {
+    if (navigator.serviceWorker) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg && reg.showNotification) {
+        await reg.showNotification(titulo, opcoes);
+        return;
+      }
+    }
+    new Notification(titulo, opcoes);
+  } catch (e) {
+    /* Falhar em avisar é chato; derrubar o app é inaceitável. */
+    console.error("[lembrete] não consegui mostrar o aviso:", e);
+  }
+}
 function LembreteTreinoWatcher() {
   const [lembrete] = useLocalStorage("lembrete-treino", LEMBRETE_PADRAO);
   const [diasSelecionados] = useLocalStorage("dias-selecionados", []);
@@ -5272,10 +5306,12 @@ function LembreteTreinoWatcher() {
       const alvo = new Date();
       alvo.setHours(h || 18, m || 0, 0, 0);
       if (agora < alvo) return;
-      new Notification("Hora do treino 💪", {
+      avisar("Hora do treino 💪", {
         body: "Você tem treino planejado hoje e ainda não registrou nada. Bora?",
         icon: LOGO_SRC
       });
+      /* Marca o dia mesmo se o aviso falhar. Sem isso, um erro faria o
+         verificador tentar de novo a cada minuto até meia-noite. */
       setUltimoAviso(hojeStr);
     };
     verificar();
