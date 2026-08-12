@@ -69,8 +69,27 @@ const nuvem = {
     try {
       window.localStorage.removeItem(PREFIX + "_cliente");
     } catch (e) {}
-    window.addEventListener("online", () => this.descarregarFila());
+    window.addEventListener("online", () => {
+      this.descarregarFila();
+      this.reconciliarSeVelho();
+    });
     setInterval(() => this.descarregarFila(), 20000);
+
+    /* Celular que dorme mata o WebSocket sem avisar. Quando o app volta pra
+       frente, o que o outro aparelho gravou nesse meio tempo já passou —
+       reconectar não traz o que se perdeu, só o que vier depois. Por isso
+       busca de novo ao voltar. */
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") this.reconciliarSeVelho();
+    });
+  },
+  /* Evita buscar a cada alt-tab: no máximo uma vez por minuto. */
+  reconciliarSeVelho() {
+    if (!this.token) return;
+    const agora = Date.now();
+    if (this.ultimaReconciliacao && agora - this.ultimaReconciliacao < 60000) return;
+    this.ultimaReconciliacao = agora;
+    this.reconciliar().catch(e => console.error("[nuvem] reconciliar:", e && e.message));
   },
   /* Hora da última alteração de cada chave FEITA NESTE APARELHO. É o que
      permite ao servidor recusar uma gravação atrasada. */
@@ -147,7 +166,7 @@ const nuvem = {
     try {
       window.localStorage.setItem(CHAVE_TOKEN, r.token);
     } catch (e) {}
-    await this.primeiraSincronizacao();
+    await this.reconciliar();
     this.conectar();
     return r.aluno;
   },
@@ -168,12 +187,19 @@ const nuvem = {
     }
     window.location.reload();
   },
-  /* Login neste aparelho: junta o que existe dos dois lados, chave a chave,
-     ficando sempre com a versão MAIS NOVA.
+  /* Junta o que existe dos dois lados, chave a chave, ficando sempre com a
+     versão MAIS NOVA.
       Antes a nuvem simplesmente ganhava. Isso apagava trabalho recente feito
      aqui que ainda não tinha subido — bastava um outro aparelho ter mandado
-     qualquer coisa depois. Agora quem decide é a hora de cada chave. */
-  async primeiraSincronizacao() {
+     qualquer coisa depois. Agora quem decide é a hora de cada chave.
+      RODA TODA VEZ QUE O APP ABRE, não só no login. Antes só rodava ao
+     entrar, e o resto dependia do WebSocket: aparelho que estava fechado na
+     hora que o outro gravou perdia o aviso e NUNCA mais ia buscar. Ficava
+     mostrando dado velho pra sempre. Pior: bastava registrar qualquer coisa
+     nele pra esse dado velho subir com hora nova e apagar o que o outro
+     aparelho tinha gravado. */
+  async reconciliar() {
+    this.ultimaReconciliacao = Date.now();
     let daNuvem = {};
     let horasDaNuvem = {};
     try {
@@ -5721,7 +5747,14 @@ function PortaoDeAcesso({
       });
       setSituacao(s);
       setEstado(s.liberado ? "liberado" : "bloqueado");
-      if (s.liberado) nuvem.conectar();
+      if (s.liberado) {
+        /* Busca o que mudou enquanto este aparelho esteve fechado, ANTES de
+           ligar o tempo real. O WebSocket só traz o que acontece daqui pra
+           frente; sem esta linha, treino registrado no PC com o celular
+           desligado nunca aparecia no celular. */
+        await nuvem.reconciliar();
+        nuvem.conectar();
+      }
     } catch (e) {
       if (e.status === 401) {
         // token vencido ou conta apagada: volta pro login

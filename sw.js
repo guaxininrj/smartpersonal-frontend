@@ -1,5 +1,5 @@
 /* Service worker do Smart Coliseu — gerado por build.js */
-const CACHE = 'smart-coliseu-v1786546416718';
+const CACHE = 'smart-coliseu-v1786546835323';
 
 /* casca do app: o que precisa estar em cache pra abrir sem internet */
 const CASCA = [
