@@ -1,5 +1,5 @@
-/* Service worker do Smart Coliseu — gerado por build.js */
-const CACHE = 'smart-coliseu-v1786547655661';
+/* Service worker do Smart Coliseu */
+const CACHE = 'smart-coliseu-v2';
 
 /* casca do app: o que precisa estar em cache pra abrir sem internet */
 const CASCA = [
@@ -68,7 +68,22 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  /* resto (js, css, icones): cache primeiro, que e o que deixa rapido */
+  /* app.js e manifest.json: rede primeiro, igual o HTML. É o "cerebro" do
+     app -- cachear primeiro fazia uma correção publicada nunca chegar no
+     navegador de quem já tinha instalado o PWA antes (o service worker
+     continuava servindo a versão velha do cache pra sempre, já aconteceu
+     de verdade: um conserto no cronômetro não pegou até essa troca). */
+  if (url.pathname.endsWith('/app.js') || url.pathname.endsWith('/manifest.json')) {
+    e.respondWith(
+      fetch(req)
+        .then((r) => { const c = r.clone(); caches.open(CACHE).then((k) => k.put(req, c)); return r; })
+        .catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  /* resto (vendor, fontes, icones): cache primeiro -- muda raramente, e o
+     que deixa rapido e funciona offline. */
   e.respondWith(
     caches.match(req).then((hit) => hit || fetch(req).then((r) => {
       const c = r.clone();
