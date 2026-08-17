@@ -6,5 +6,6 @@ COPY security-headers.conf /etc/nginx/security-headers.conf
 COPY index.html manifest.json sw.js app.js /usr/share/nginx/html/
 COPY icons  /usr/share/nginx/html/icons
 COPY vendor /usr/share/nginx/html/vendor
+COPY fontes /usr/share/nginx/html/fontes
 
 EXPOSE 80
