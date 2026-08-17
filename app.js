@@ -2662,6 +2662,23 @@ function TreinoPersonalizado() {
     }, 1000);
     return () => clearInterval(id);
   }, [timer && timer.fase, timer && timer.exId, timer && timer.serieIndex]);
+
+  /* trava a rolagem da página enquanto o cronômetro está na tela -- mesmo
+     motivo do outro fluxo (Planos de Treino): o modal é fixed, mas sem isso
+     dava pra rolar o conteúdo por baixo dele arrastando o dedo. */
+  useEffect(() => {
+    if (!timer) return;
+    const body = document.body;
+    const raiz = document.documentElement;
+    const overflowBodyAntes = body.style.overflow;
+    const overflowRaizAntes = raiz.style.overflow;
+    body.style.overflow = "hidden";
+    raiz.style.overflow = "hidden";
+    return () => {
+      body.style.overflow = overflowBodyAntes;
+      raiz.style.overflow = overflowRaizAntes;
+    };
+  }, [!!timer]);
   const adicionar = () => {
     if (!nome || !grupo) return;
     setLista(prev => [...prev, {
