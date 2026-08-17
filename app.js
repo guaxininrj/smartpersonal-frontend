@@ -1953,7 +1953,12 @@ function CronometroModal({
   const circunferencia = 2 * Math.PI * raio;
   const offset = circunferencia * (1 - fracaoRestante);
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-black/90 px-4 backdrop-blur-sm fade-up"
+    className: "fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-black/90 px-4 backdrop-blur-sm fade-up",
+    style: {
+      touchAction: "none"
+    },
+    onTouchMove: e => e.preventDefault(),
+    onWheel: e => e.preventDefault()
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex flex-col items-center gap-1 text-center"
   }, /*#__PURE__*/React.createElement("span", {
@@ -2221,6 +2226,24 @@ function PlanosTreino() {
     }, 1000);
     return () => clearInterval(id);
   }, [timer && timer.fase, timer && timer.exId, timer && timer.serieIndex]);
+
+  /* trava a rolagem da página enquanto o cronômetro (série ou descanso) está
+     na tela — o modal já é "fixed", mas sem isso dava pra rolar o conteúdo
+     por baixo dele arrastando o dedo, o que destacava o card errado quando
+     o cronômetro fechava. */
+  useEffect(() => {
+    if (!timer) return;
+    const body = document.body;
+    const raiz = document.documentElement;
+    const overflowBodyAntes = body.style.overflow;
+    const overflowRaizAntes = raiz.style.overflow;
+    body.style.overflow = "hidden";
+    raiz.style.overflow = "hidden";
+    return () => {
+      body.style.overflow = overflowBodyAntes;
+      raiz.style.overflow = overflowRaizAntes;
+    };
+  }, [!!timer]);
 
   /* recalcula e grava (ou remove) a sessão do dia ativo no log, de forma síncrona,
      sempre que uma série é marcada ou resetada — evita depender de um useEffect
